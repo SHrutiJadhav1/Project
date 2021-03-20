@@ -1,0 +1,81 @@
+import matplotlib
+
+matplotlib.use('Agg')
+
+import json as js
+
+import numpy as np
+
+import cv2
+
+from matplotlib import pyplot as plt
+
+file_path = "/home/ajit/Documents/proj/train_set/label_data_0313.json"
+
+Save_image_train_path = "/home/ajit/Documents/proj/trainImg"
+
+Save_gt_train_path = "/home/ajit/Documents/proj/trainMask"
+
+Read_image_path = "/home/ajit/Documents/proj/train_set/"
+
+count = 0
+
+with open(file_path, 'r') as filehandle:
+
+    #json_data = [js.loads(line) for line in filehandle]
+
+    data = filehandle.readlines()
+
+    print(len(data))
+
+    for line in data:
+
+        #print(line)
+
+        #print("--------------------------------------------------------------")
+
+        image_info = js.loads(line)
+
+        print(image_info['raw_file'])
+
+        gt = np.zeros((720,1280),np.uint8)
+
+        for ls in image_info["lanes"]:
+
+            lanes = []
+
+            for x,y in zip(ls, image_info["h_samples"]):
+
+                if x > 0:
+
+                    lanes.append([x,y])
+
+            lane_points = np.array(lanes,np.int32)
+
+            cv2.polylines(gt, [lane_points], False, 1,10)
+
+        cv2.imshow("out",gt)
+
+        cv2.waitKey(10)
+
+        
+
+        # Resize gt and save to disk
+
+        #gt = cv2.resize(gt,(640, 224), interpolation = cv2.INTER_AREA)
+
+        cv2.imwrite(Save_gt_train_path + "/" + str(count) + ".png",gt)
+
+        cv2.waitKey(10)
+
+        # read image resize and save to disk
+
+        img = cv2.imread( Read_image_path + image_info['raw_file'])
+
+        #img =  cv2.resize(img,(640, 224), interpolation = cv2.INTER_AREA)
+
+        cv2.imwrite(Save_image_train_path + "/" + str(count) + ".png", img)
+
+        
+
+        count += 1
