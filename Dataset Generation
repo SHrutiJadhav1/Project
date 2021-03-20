@@ -1,0 +1,142 @@
+import cv2
+import numpy as np
+import os
+import random
+import h5py
+import sys
+from skimage.util import random_noise
+
+def load_images_from_folder(folder):
+    images = []
+    for filename in os.listdir(folder):
+        img = cv2.imread(os.path.join(folder,filename))
+        if img is not None:
+            images.append(img)
+    return image
+
+def addsalt_pepper(img):
+    img_ = img.copy()
+    # Add salt-and-pepper noise to the image.
+    noise_img = random_noise(img, mode='s&p',amount=0.1)
+ 
+# The above function returns a floating-point image
+# on the range [0, 1], thus we changed it to 'uint8'
+# and from [0,255]
+    noise_img = np.array(255*noise_img, dtype = 'uint8')
+    return noise_img
+
+def crop_subimages(index, image, mask, hf_images, hf_masks, subimage_width=0, subimage_height=0, stride_row = 0, stride_col = 0, offset_row=0):
+    height, width, channels = image.shape
+    #print(image.shape)
+    ignored = 0
+    emptyImages = 0
+    for row in range(offset_row, height - subimage_height, stride_row):
+        for col in range(0, width - subimage_width, stride_col):
+            subimage = np.array(image[ row:row+subimage_height, col:col+subimage_width ])
+            submask = np.array(mask[ row:row+subimage_height, col:col+subimage_width ])
+
+            if np.any(submask):
+                background, road = np.unique(submask, return_counts=True)[1]
+                # ignore where road pixle fall below 1% of total pixels
+                if road/background < 0.01:
+                    ignored += 1
+                    print("ignored: ", ignored)
+                    continue
+                # ignore if image has more than 20% of white patch
+                if np.sum(np.all(subimage==255, axis=2))/(subimage_width*subimage_height) > 0.2:
+                    ignored += 1
+                    continue
+
+                #subimage = addsalt_pepper(subimage)
+                #cv2.imshow("img", subimage)
+                #cv2.imshow("mask", submask)
+                #cv2.waitKey(1)
+                                
+                subimage_small = cv2.resize(subimage,(224, 224), interpolation = cv2.INTER_AREA)
+                hf_images.create_dataset(name = str(index), data = subimage_small, shape = (224, 224,3), compression="gzip", compression_opts=9)
+
+                submask_small = cv2.resize(submask,(224, 224), interpolation = cv2.INTER_AREA)
+                hf_masks.create_dataset(name = str(index), data = submask_small, shape = (224, 224), compression="gzip", compression_opts=9)
+                index += 1
+
+                # horizontal flip
+                hf_images.create_dataset(name = str(index), data = cv2.flip(subimage_small, 1), shape = (224, 224,3), compression="gzip", compression_opts=9)
+                hf_masks.create_dataset(name = str(index), data = cv2.flip(submask_small, 1), shape = (224, 224), compression="gzip", compression_opts=9)
+                index += 1
+
+                # add Noise
+                hf_images.create_dataset(name = str(index), data = addsalt_pepper(subimage_small), shape = (224, 224,3), compression="gzip", compression_opts=9)
+                hf_masks.create_dataset(name = str(index), data = submask_small, shape = (224, 224), compression="gzip", compression_opts=9)
+                index += 1
+                
+            else:
+                emptyImages+= 1
+    #print("\npotential images: {}, index: {}, empty images: {},  ignored images: {}".format(potentialImages, index, emptyImages, ignored))
+    return index
+
+def subimages_croped_from_given_images(datasetPaths, subimage_width=500, subimage_height=500, stride = 225, offset_row=100):
+    image_list = list()
+    mask_list = list()
+    ignored = 0
+    potentialImages = 0
+    emptyImages = 0
+
+    hf_images = h5py.File('TrainImages.h5', 'w')
+    hf_masks = h5py.File('TrainMasks.h5', 'w')
+    #hf_images = h5py.File('ValidationImages.h5', 'w')
+    #hf_masks = h5py.File('ValidationMasks.h5', 'w')
+    #hf_images.create_dataset('my_images', (178689, 256, 256, 3), dtype='uint8')
+    #hf_masks.create_dataset('my_masks', (178689, 256, 256), dtype='uint8')
+
+    index = 0
+    for imagePath, maskPath in datasetPaths:
+        print(imagePath, maskPath)
+        image = cv2.imread(imagePath)
+        mask = cv2.imread(maskPath, cv2.IMREAD_GRAYSCALE)
+        if ((image is not None) and (mask is not None)):
+            index = crop_subimages(index, image, mask, hf_images, hf_masks, subimage_width=500, subimage_height=500, stride_row = 100, stride_col = 200, offset_row=100)
+            index = crop_subimages(index, image, mask, hf_images, hf_masks, subimage_width=700, subimage_height=700, stride_row = 100, stride_col = 200, offset_row=10)
+            print("index:", index)
+        else:
+            print("Read Failed")
+        #hf_images.flush()
+        #hf_masks.flush()
+    hf_images.close()
+    hf_masks.close()
+    return (image_list, mask_list)
+
+def get_correspoding_image_and_mask_paths(imageDir, maskDir):
+    pathMapping = list()
+    imageNameList = os.listdir(imageDir)
+    for maskName in os.listdir(maskDir):
+        if maskName in imageNameList:
+            imagePath = os.path.join(imageDir, maskName)
+            maskPath = os.path.join(maskDir, maskName)
+            pathMapping.append((imagePath, maskPath))
+    return pathMapping
+
+if __name__ == "__main__":
+    #imageDir = "/home/calm/Pictures/images"
+    #maskDir =  "/home/calm/Pictures/labels"
+    trainimageDir = "/home/ajit/Documents/proj/trainImg"
+    trainmaskDir =  "/home/ajit/Documents/proj/trainMask"
+
+    valimageDir = "/home/ajit/Documents/proj/validationImg"
+    valmaskDir =  "/home/ajit/Documents/proj/validationMask"
+
+    pathMappings = get_correspoding_image_and_mask_paths(trainimageDir, trainmaskDir)
+    #pathMappings = get_correspoding_image_and_mask_paths(valimageDir, valmaskDir)
+    subimages, submasks = subimages_croped_from_given_images(pathMappings)
+    print("subimages {} submask {}".format(len(subimages), len(submasks)))
+
+    #hf_images = h5py.File('images.h5', 'w')
+    #hf_masks = h5py.File('masks.h5', 'w')
+    #hf_images.create_dataset('my_images', data = np.array(subimages))
+    #hf_masks.create_dataset('my_masks', data = np.array(submasks))
+    #for i,m in zip(subimages, submasks):
+    #    cv2.imshow("img", i)
+    #    cv2.imshow("mask",m)
+    #    cv2.waitKey(5)
+    print("done")
+    #hf_images.close()
+    #hf_masks.close()
